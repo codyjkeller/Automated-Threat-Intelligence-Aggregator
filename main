@@ -1,0 +1,117 @@
+import requests
+import json
+
+class ThreatIntelAggregator:
+    def __init__(self):
+        self.sources = {
+            "VirusTotal": {
+                "url": "https://www.virustotal.com/api/v3/ip_address/{ip_address}",  # Replace {ip_address}
+                "api_key": "YOUR_VIRUSTOTAL_API_KEY",  # Replace with your actual API key
+                "format": "json",
+            },
+            "AbuseIPDB": {
+                "url": "https://api.abuseipdb.com/api/v2/check?ipAddress={ip_address}&maxAgeInDays=30", # Replace {ip_address}
+                "api_key": "YOUR_ABUSEIPDB_API_KEY",  # Replace with your actual API key
+                "format": "json",
+            },
+        }
+
+    def get_ip_reputation(self, ip_address):
+        """
+        Retrieves the reputation of an IP address from multiple threat intelligence sources.
+
+        Args:
+            ip_address (str): The IP address to look up.
+
+        Returns:
+            dict: A dictionary containing the reputation data from each source,
+                  or an error message if the lookup fails.
+        """
+        results = {}
+        for source, config in self.sources.items():
+            try:
+                if source == "VirusTotal":
+                    url = config["url"].format(ip_address=ip_address)
+                    headers = {"x-apikey": config["api_key"]}
+                    response = requests.get(url, headers=headers)
+                    response.raise_for_status()  # Raise an exception for bad status codes
+                    results[source] = response.json()
+
+                elif source == "AbuseIPDB":
+                    url = config["url"].format(ip_address=ip_address)
+                    headers = {
+                        "Accept": "application/json",
+                        "Key": config["api_key"],
+                    }
+                    response = requests.get(url, headers=headers)
+                    response.raise_for_status()
+                    results[source] = response.json()
+
+                else:
+                    results[source] = {"error": f"Source '{source}' not supported"}
+
+            except requests.exceptions.RequestException as e:
+                results[source] = {"error": f"Error querying {source}: {e}"}
+            except json.JSONDecodeError:
+                results[source] = {"error": f"Error decoding JSON from {source}"}
+
+        return results
+
+    def summarize_reputation(self, ip_address, raw_data):
+        """
+        Summarizes the reputation data in a more concise format.
+
+        Args:
+            ip_address (str): The IP address that was looked up.
+            raw_data (dict): The raw data returned by get_ip_reputation.
+
+        Returns:
+            dict: A summarized view of the IP reputation.
+        """
+        summary = {"ip_address": ip_address, "sources": {}}
+        for source, data in raw_data.items():
+            if "error" in data:
+                summary["sources"][source] = {"status": "error", "message": data["error"]}
+            elif source == "VirusTotal":
+                if 'data' in data:
+                  attributes = data['data']['attributes']
+                  summary["sources"][source] = {
+                      "status": "OK",
+                      "malicious_count": attributes.get('last_analysis_stats', {}).get('malicious', 0),
+                      "total_count":     attributes.get('last_analysis_stats', {}).get('total', 0),
+                  }
+                else:
+                    summary["sources"][source] = {"status": "No data found"}
+            elif source == "AbuseIPDB":
+                if 'data' in data:
+                    summary["sources"][source] = {
+                        "status": "OK",
+                        "abuse_confidence_score": data["data"].get("abuseConfidenceScore", 0),
+                        "reports": data["data"].get("totalReports", 0),
+                    }
+                else:
+                    summary["sources"][source] = {"status": "No data found"}
+            else:
+                summary["sources"][source] = {"status": "Not Implemented"}
+        return summary
+
+    def get_domain_reputation(self, domain):
+        """
+        Retrieves domain reputation (skeleton -  Add functionality).
+        """
+        results = {}
+        #  Add code to query domain reputation from sources like VirusTotal, etc.
+        return results
+
+# --- Example Usage ---
+if __name__ == "__main__":
+    aggregator = ThreatIntelAggregator()
+    ip_to_lookup = "8.8.8.8"  # Google Public DNS
+
+    raw_reputation_data = aggregator.get_ip_reputation(ip_to_lookup)
+    print(f"Raw Reputation Data for {ip_to_lookup}:")
+    print(json.dumps(raw_reputation_data, indent=2))
+
+    summary = aggregator.summarize_reputation(ip_to_lookup, raw_reputation_data)
+    print(f"\nSummarized Reputation for {ip_to_lookup}:")
+    print(json.dumps(summary, indent=2))
